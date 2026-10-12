@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// WA BOT BARA — Simple Menu + RVO
+// WA BOT BARA v3.0 — SESSION SAFE + PAIRING FIX
 // ═══════════════════════════════════════════════════════════
 
 require('dotenv').config();
@@ -15,15 +15,10 @@ const readline = require('readline');
 const fs = require('fs');
 
 const SESSION_NAME = process.env.SESSION_NAME || 'auth_session';
-const MODE = process.env.MODE || 'pairing';
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (q) => new Promise(r => rl.question(q, r));
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-// ═══════════════════════════════════════════════════════════
-// HELPER
-// ═══════════════════════════════════════════════════════════
 
 function log(msg) {
     console.log('[' + new Date().toLocaleTimeString() + '] ' + msg);
@@ -35,92 +30,106 @@ function isCommand(text, cmd) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// BOT START
+// START BOT — SESSION SAFE
 // ═══════════════════════════════════════════════════════════
 
 async function startBot() {
-    const { version } = await fetchLatestBaileysVersion();
-    log('Baileys version: ' + version.join('.'));
-
-    // Cek session lama
+    // ⚠️ JANGAN auto-hapus session
+    // Cuma hapus kalau lu manual hapus folder-nya
     const credsPath = SESSION_NAME + '/creds.json';
-    if (fs.existsSync(credsPath)) {
-        try {
-            const creds = JSON.parse(fs.readFileSync(credsPath));
-            if (!creds.me) {
-                log('Session belum registered, hapus...');
-                fs.rmSync(SESSION_NAME, { recursive: true, force: true });
-            }
-        } catch (e) {
-            fs.rmSync(SESSION_NAME, { recursive: true, force: true });
-        }
+    const hasSession = fs.existsSync(credsPath);
+
+    if (hasSession) {
+        log('Session ditemukan, coba resume...');
+    } else {
+        log('Session tidak ada, butuh pairing baru');
     }
 
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_NAME);
+    const { version } = await fetchLatestBaileysVersion();
+
+    log('WA protocol version: ' + version.join('.'));
 
     const sock = makeWASocket({
         version,
         auth: state,
-        printQRInTerminal: MODE === 'qr',
+        printQRInTerminal: false,
         logger: P({ level: 'silent' }),
         browser: Browsers.ubuntu('Chrome'),
         syncFullHistory: false,
         markOnlineOnConnect: true,
-        connectTimeoutMs: 180000,
-        defaultQueryTimeoutMs: 180000,
-        keepAliveIntervalMs: 25000,
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 60000,
+        keepAliveIntervalMs: 30000,
         generateHighQualityLinkPreview: false,
         getMessage: async () => undefined
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // ─── PAIRING MODE ───
-    if (MODE === 'pairing' && !sock.authState.creds.registered) {
-        await sleep(2000);
+    // ═══════════════════════════════════════════════════════
+    // PAIRING CODE — kalau belum registered
+    // ═══════════════════════════════════════════════════════
+    if (!sock.authState.creds.registered) {
+        await sleep(3000);
 
         let botNumber = process.env.BOT_NUMBER;
         if (!botNumber) {
-            botNumber = (await ask('[?] Nomor bot (contoh: 6283172030829): ')).trim();
+            botNumber = (await ask('\n[?] Nomor bot (contoh: 6283172030829): ')).trim();
         }
 
         const cleanNumber = botNumber.replace(/[^0-9]/g, '');
-        log('Request pairing code untuk: ' + cleanNumber);
 
-        let pairingCode = null;
-        for (let attempt = 1; attempt <= 5; attempt++) {
-            try {
-                pairingCode = await sock.requestPairingCode(cleanNumber);
-                break;
-            } catch (e) {
-                log('Gagal attempt ' + attempt + ': ' + e.message);
-                if (attempt < 5) await sleep(5000);
-            }
-        }
-
-        if (!pairingCode) {
-            console.error('[✗] Gagal request pairing code');
-            process.exit(1);
-        }
-
-        console.log('\n═══════════════════════════════════════════');
-        console.log('           🔑 PAIRING CODE 🔑');
-        console.log('');
-        console.log('              >>> ' + pairingCode + ' <<<');
         console.log('');
         console.log('═══════════════════════════════════════════');
+        console.log('  PAIRING REQUEST');
+        console.log('  Nomor: ' + cleanNumber);
+        console.log('═══════════════════════════════════════════');
         console.log('');
-        console.log('  CARA PAKAI:');
-        console.log('  1. Buka WhatsApp → Perangkat Tertaut');
-        console.log('  2. Tautkan Perangkat');
-        console.log('  3. Pilih "Tautkan dengan Nomor Telepon"');
-        console.log('  4. Ketik: ' + pairingCode);
-        console.log('');
-        console.log('  ⚡ Expired 2 menit');
-        console.log('');
+
+        try {
+            const pairingCode = await sock.requestPairingCode(cleanNumber);
+
+            console.log('');
+            console.log('═══════════════════════════════════════════');
+            console.log('           🔑 PAIRING CODE 🔑');
+            console.log('');
+            console.log('              >>> ' + pairingCode + ' <<<');
+            console.log('');
+            console.log('═══════════════════════════════════════════');
+            console.log('');
+            console.log('  CARA PAKAI:');
+            console.log('');
+            console.log('  1. BUKA WhatsApp di HP nomor ' + cleanNumber);
+            console.log('  2. Menu (⋮) → Perangkat Tertaut');
+            console.log('  3. Tautkan Perangkat');
+            console.log('  4. Pilih "Tautkan dengan Nomor Telepon"');
+            console.log('  5. Ketik: ' + pairingCode);
+            console.log('');
+            console.log('  ⚡ Expired 2 menit. BURUAN!');
+            console.log('');
+            console.log('  [*] Menunggu...');
+            console.log('');
+
+        } catch (e) {
+            console.error('');
+            console.error('[✗] GAGAL request pairing code');
+            console.error('[✗] Error: ' + e.message);
+            console.error('');
+            console.error('KEMUNGKINAN PENYEBAB:');
+            console.error('1. Device penuh (4 linked) — hapus 1 di WA');
+            console.error('2. WhatsApp versi lama — update dulu');
+            console.error('3. Nomor salah format — harus 62xxx');
+            console.error('4. Rate limit — tunggu 10 menit');
+            console.error('5. Baileys 7.0.0-rc (buggy) — turunin ke 6.7.9');
+            console.error('');
+            process.exit(1);
+        }
     }
 
-    // ─── HANDLE MESSAGE ───
+    // ═══════════════════════════════════════════════════════
+    // HANDLE MESSAGE
+    // ═══════════════════════════════════════════════════════
     sock.ev.on('messages.upsert', async (msg) => {
         try {
             const m = msg.messages[0];
@@ -128,10 +137,6 @@ async function startBot() {
             if (m.key.fromMe) return;
 
             const from = m.key.remoteJid;
-            const isGroup = from.endsWith('@g.us');
-            const sender = isGroup ? m.key.participant : from;
-
-            // Ambil text
             const text =
                 m.message.conversation ||
                 m.message.extendedTextMessage?.text ||
@@ -139,21 +144,21 @@ async function startBot() {
                 m.message.videoMessage?.caption ||
                 '';
 
-            log('Pesan dari ' + sender + ': ' + text.substring(0, 50));
+            log('Pesan dari ' + from + ': ' + text.substring(0, 50));
 
-            // ─── COMMAND .menu ───
+            // ─── .menu ───
             if (isCommand(text, '.menu')) {
-                const menuText = 
+                const menuText =
                     '╭━━━━━━━━━━━━━━━━━━━━━╮\n' +
-                    '┃  🔥 *BARA BOT* 🔥      ┃\n' +
+                    '┃  🔥 *BARA BOT* 🔥   ┃\n' +
                     '╰━━━━━━━━━━━━━━━━━━━━━╯\n' +
                     '\n' +
                     'Halo *Bara*! Ini menunya:\n' +
                     '\n' +
                     '╭──「 *MAIN MENU* 」──\n' +
                     '│\n' +
-                    '│ .menu   → Tampilkan menu\n' +
-                    '│ .rvo    → Reply View Once\n' +
+                    '│ .menu → Menu\n' +
+                    '│ .rvo  → Reply View Once\n' +
                     '│\n' +
                     '╰──────────────────\n' +
                     '\n' +
@@ -161,18 +166,17 @@ async function startBot() {
                     '1. Kirim foto sekali lihat\n' +
                     '2. Reply fotonya\n' +
                     '3. Ketik .rvo\n' +
-                    '4. Bot kirim ulang fotonya\n' +
+                    '4. Bot kirim ulang\n' +
                     '\n' +
                     '> BARA BOT ☠️';
 
                 await sock.sendMessage(from, { text: menuText }, { quoted: m });
-                log('Menu terkirim ke ' + from);
+                log('Menu terkirim');
                 return;
             }
 
-            // ─── COMMAND .rvo (Reply View Once) ───
+            // ─── .rvo ───
             if (isCommand(text, '.rvo')) {
-                // Cek apakah ini reply
                 const quoted = m.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
                 if (!quoted) {
@@ -182,10 +186,7 @@ async function startBot() {
                     return;
                 }
 
-                // Cek apakah quoted message adalah view once
                 let viewOnce = null;
-                let type = null;
-
                 if (quoted.viewOnceMessageV2) {
                     viewOnce = quoted.viewOnceMessageV2.message;
                 } else if (quoted.viewOnceMessage) {
@@ -201,31 +202,27 @@ async function startBot() {
                     return;
                 }
 
-                // Kirim ulang tanpa view once
                 if (viewOnce.imageMessage) {
-                    type = 'image';
                     await sock.sendMessage(from, {
                         image: viewOnce.imageMessage,
                         caption: viewOnce.imageMessage.caption || '',
                         mimetype: viewOnce.imageMessage.mimetype || 'image/jpeg'
                     }, { quoted: m });
-                    log('RVO image terkirim ke ' + from);
+                    log('RVO image terkirim');
                 } else if (viewOnce.videoMessage) {
-                    type = 'video';
                     await sock.sendMessage(from, {
                         video: viewOnce.videoMessage,
                         caption: viewOnce.videoMessage.caption || '',
                         mimetype: viewOnce.videoMessage.mimetype || 'video/mp4'
                     }, { quoted: m });
-                    log('RVO video terkirim ke ' + from);
+                    log('RVO video terkirim');
                 } else if (viewOnce.audioMessage) {
-                    type = 'audio';
                     await sock.sendMessage(from, {
                         audio: viewOnce.audioMessage,
                         mimetype: viewOnce.audioMessage.mimetype || 'audio/ogg',
                         ptt: true
                     }, { quoted: m });
-                    log('RVO audio terkirim ke ' + from);
+                    log('RVO audio terkirim');
                 } else {
                     await sock.sendMessage(from, {
                         text: '❌ Tipe view once tidak didukung'
@@ -235,11 +232,13 @@ async function startBot() {
             }
 
         } catch (e) {
-            console.error('[✗] Error handle message: ' + e.message);
+            console.error('[✗] Error: ' + e.message);
         }
     });
 
-    // ─── WAIT CONNECTION ───
+    // ═══════════════════════════════════════════════════════
+    // CONNECTION HANDLER — AUTO RECONNECT
+    // ═══════════════════════════════════════════════════════
     return new Promise((resolve, reject) => {
         let resolved = false;
 
@@ -248,7 +247,8 @@ async function startBot() {
 
             if (connection === 'open' && !resolved) {
                 resolved = true;
-                console.log('\n╔═══════════════════════════════════════════╗');
+                console.log('');
+                console.log('╔═══════════════════════════════════════════╗');
                 console.log('║       [✓] BOT CONNECTED!                 ║');
                 console.log('╚═══════════════════════════════════════════╝');
                 console.log('[USER] ' + (sock.user?.id || 'unknown'));
@@ -264,13 +264,23 @@ async function startBot() {
                 const reason = lastDisconnect?.error?.message || 'unknown';
                 log('Connection closed: ' + reason + ' (' + code + ')');
 
+                // Logged out dari HP — session invalid
                 if (code === DisconnectReason.loggedOut || code === 401) {
+                    console.error('[✗] Logged out. Hapus auth_session & ulang.');
                     reject(new Error('Logged out'));
                     return;
                 }
 
-                log('Reconnect...');
-                await sleep(3000);
+                // Bad session
+                if (code === DisconnectReason.badSession) {
+                    console.error('[✗] Bad session. Hapus auth_session & ulang.');
+                    reject(new Error('Bad session'));
+                    return;
+                }
+
+                // Auto reconnect
+                log('Reconnect 5s...');
+                await sleep(5000);
                 try {
                     const newSock = await startBot();
                     resolve(newSock);
@@ -289,8 +299,8 @@ async function startBot() {
 (async () => {
     console.log('');
     console.log('╔═══════════════════════════════════════════╗');
-    console.log('║       🔥 WA BOT BARA v1.0 🔥              ║');
-    console.log('║          Simple + RVO                      ║');
+    console.log('║    🔥 WA BOT BARA v3.0 🔥                 ║');
+    console.log('║    Session Safe + Pairing Fix              ║');
     console.log('╚═══════════════════════════════════════════╝');
     console.log('');
 
